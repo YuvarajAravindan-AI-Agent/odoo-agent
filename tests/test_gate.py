@@ -186,3 +186,26 @@ def test_tokens_must_differ(env):
     odoo, store, build = env
     with pytest.raises(RuntimeError):
         create_app(build(scripted()), "same", "same")
+
+
+def test_lockout_after_failed_tokens_and_chat_cap(env, monkeypatch):
+    odoo, store, build = env
+    monkeypatch.setenv("AUTH_FAIL_LIMIT", "3")
+    monkeypatch.setenv("CHAT_PER_HOUR", "2")
+    ag = build(scripted(*([[{"text": "hi"}]] * 5)))
+    c = TestClient(create_app(ag, "agent-secret", "approver-secret"))
+    bad = {"Authorization": "Bearer nope"}
+    assert [c.get("/proposals", headers=bad).status_code for _ in range(3)] == [401, 401, 401]
+    assert c.get("/proposals", headers=bad).status_code == 429
+    A = {"Authorization": "Bearer agent-secret"}
+    assert c.post("/chat", json={"session_id": "s", "message": "x"}, headers=A).status_code == 429  # same IP now locked out
+
+
+def test_chat_hourly_cap(env, monkeypatch):
+    odoo, store, build = env
+    monkeypatch.setenv("CHAT_PER_HOUR", "2")
+    ag = build(scripted(*([[{"text": "hi"}]] * 5)))
+    c = TestClient(create_app(ag, "agent-secret", "approver-secret"))
+    A = {"Authorization": "Bearer agent-secret"}
+    codes = [c.post("/chat", json={"session_id": "s", "message": "x"}, headers=A).status_code for _ in range(3)]
+    assert codes == [200, 200, 429]

@@ -25,3 +25,8 @@ Nothing else changes: the gate applies automatically.
 
 ## Known gaps
 - Chat history is in memory; proposals/audit are in SQLite.
+
+## Public exposure
+`https://odoo-agent.ai-agentic-enterprises.com` via Caddy (needs A record -> 169.58.69.167 at Spaceship).
+Hardening: bearer tokens (two), per-IP lockout after `AUTH_FAIL_LIMIT` (10) failures / 15 min, global `CHAT_PER_HOUR` (60) cap on LLM spend,
+CSP + HSTS + noindex, 16 KB request cap. Rotate tokens by editing `/opt/odoo-agent/.env` and `systemctl restart odoo-agent`.

@@ -1,14 +1,16 @@
 """HTTP layer. Two distinct tokens: AGENT_TOKEN may chat; only APPROVER_TOKEN may approve/reject."""
 import hmac
 import os
+import time
+from collections import defaultdict, deque
 from pathlib import Path
 
 from dotenv import load_dotenv
 
 load_dotenv()
 
-from fastapi import Body, Depends, FastAPI, Header, HTTPException  # noqa: E402
-from fastapi.responses import HTMLResponse  # noqa: E402
+from fastapi import Body, Depends, FastAPI, Header, HTTPException, Request  # noqa: E402
+from fastapi.responses import HTMLResponse, PlainTextResponse  # noqa: E402
 
 from .agent import Agent  # noqa: E402
 from .llm import make_generate  # noqa: E402
@@ -16,11 +18,33 @@ from .odoo import Odoo  # noqa: E402
 from .store import Store  # noqa: E402
 
 
-def _bearer(expected: str):
-    def dep(authorization: str | None = Header(default=None)) -> None:
+class Window:
+    """Sliding-window counter."""
+    def __init__(self, limit: int, seconds: int):
+        self.limit, self.seconds, self.hits = limit, seconds, defaultdict(deque)
+
+    def _trim(self, key):
+        q, now = self.hits[key], time.time()
+        while q and q[0] < now - self.seconds:
+            q.popleft()
+        return q
+
+    def blocked(self, key) -> bool:
+        return len(self._trim(key)) >= self.limit
+
+    def add(self, key) -> None:
+        self._trim(key).append(time.time())
+
+
+def _bearer(expected: str, failures: Window):
+    def dep(request: Request, authorization: str | None = Header(default=None)) -> None:
         if not expected:
             raise HTTPException(500, "token not configured")
+        ip = request.client.host if request.client else "?"  # real client IP via uvicorn --proxy-headers behind Caddy
+        if failures.blocked(ip):
+            raise HTTPException(429, "Too many failed attempts, try later")
         if not hmac.compare_digest(authorization or "", f"Bearer {expected}"):
+            failures.add(ip)
             raise HTTPException(401, "Unauthorized")
     return dep
 
@@ -40,11 +64,18 @@ def create_app(agent: Agent | None = None, agent_token: str | None = None, appro
             high_value_threshold=float(os.getenv("HIGH_VALUE_THRESHOLD", "50000")))
 
     app = FastAPI(title="Odoo approval-gated agent")
-    is_agent, is_approver = _bearer(agent_token), _bearer(approver_token)
+    failures = Window(int(os.getenv("AUTH_FAIL_LIMIT", "10")), 900)  # shared across both tokens, per client IP
+    is_agent, is_approver = _bearer(agent_token, failures), _bearer(approver_token, failures)
+    chats = Window(int(os.getenv("CHAT_PER_HOUR", "60")), 3600)  # global cap: bounds LLM spend even with a valid token
 
     @app.get("/", response_class=HTMLResponse)
     def ui():
-        return (Path(__file__).parent / "ui.html").read_text()
+        return HTMLResponse((Path(__file__).parent / "ui.html").read_text(),
+                            headers={"Cache-Control": "no-store", "X-Robots-Tag": "noindex, nofollow"})
+
+    @app.get("/robots.txt", response_class=PlainTextResponse)
+    def robots():
+        return "User-agent: *\nDisallow: /\n"
 
     @app.get("/health")
     def health():
@@ -53,6 +84,9 @@ def create_app(agent: Agent | None = None, agent_token: str | None = None, appro
 
     @app.post("/chat", dependencies=[Depends(is_agent)])
     def chat(session_id: str = Body(..., max_length=64), message: str = Body(..., max_length=2000)):
+        if chats.blocked("all"):
+            raise HTTPException(429, "Hourly chat limit reached")
+        chats.add("all")
         try:
             return agent.chat(session_id, message)
         except RuntimeError as e:
