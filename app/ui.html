@@ -6,56 +6,89 @@
 @media(prefers-color-scheme:dark){:root{--bg:#14171c;--fg:#e6e9ee;--card:#1d222a;--line:#2e3540;--acc:#c58fb8;--ok:#4cc38a;--bad:#f2766d;--warn:#e3b341}}
 *{box-sizing:border-box}body{margin:0;font:15px/1.45 system-ui,sans-serif;background:var(--bg);color:var(--fg)}
 header{padding:12px 16px;border-bottom:1px solid var(--line);display:flex;gap:8px;flex-wrap:wrap;align-items:center}
-header h1{font-size:16px;margin:0 auto 0 0}input,button,textarea{font:inherit;color:inherit}
-input,textarea{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:6px 8px}
-button{background:var(--acc);color:#fff;border:0;border-radius:6px;padding:6px 12px;cursor:pointer}
+header h1{font-size:16px;margin:0 auto 0 0}input,button{font:inherit;color:inherit}
+input{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:7px 9px}
+button{background:var(--acc);color:#fff;border:0;border-radius:6px;padding:7px 12px;cursor:pointer}
 button.sec{background:transparent;color:var(--fg);border:1px solid var(--line)}button.bad{background:var(--bad)}button.ok{background:var(--ok)}
+.banner{background:var(--card);border-bottom:1px solid var(--line);padding:8px 16px;font-size:13px;color:var(--warn)}
 main{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:12px;max-width:1200px;margin:auto}
 @media(max-width:800px){main{grid-template-columns:1fr}}
 section{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px;min-height:200px}
 h2{font-size:14px;margin:0 0 8px;text-transform:uppercase;letter-spacing:.04em;opacity:.7}
-#log{height:50vh;overflow:auto;display:flex;flex-direction:column;gap:8px}
+#log{height:46vh;overflow:auto;display:flex;flex-direction:column;gap:8px}
 .m{padding:8px 10px;border-radius:8px;max-width:92%;white-space:pre-wrap}.u{background:var(--acc);color:#fff;align-self:flex-end}.a{background:var(--bg);border:1px solid var(--line)}
-form{display:flex;gap:6px;margin-top:8px}form input{flex:1}
+form.chat{display:flex;gap:6px;margin-top:8px}form.chat input{flex:1}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}.chips button{font-size:12px;padding:4px 9px}
 .p{border:1px solid var(--line);border-radius:8px;padding:10px;margin-bottom:8px}.p.high{border-color:var(--bad)}
 .tag{font-size:11px;padding:1px 6px;border-radius:99px;border:1px solid currentColor}.high .tag{color:var(--bad)}.low .tag{color:var(--ok)}
 .w{color:var(--warn);font-size:13px}pre{margin:6px 0;white-space:pre-wrap;font-size:12px;opacity:.85}.row{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
 .st{font-size:12px;opacity:.8}
+#auth{max-width:380px;margin:40px auto;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:20px}
+#auth input{width:100%;margin:6px 0}#auth .row button{flex:1}#aerr{color:var(--bad);font-size:13px;min-height:18px}
+.hide{display:none!important}
 </style></head><body>
 <header><h1>Odoo agent — approval-gated</h1>
-<input id="atok" type="password" placeholder="agent token" size="14">
-<input id="ptok" type="password" placeholder="approver token" size="14">
-<button class="sec" onclick="saveTok()">Use</button></header>
-<main>
+<span id="who" class="st"></span>
+<span id="tokbox" class="hide row"><input id="atok" type="password" placeholder="agent token" size="12"><input id="ptok" type="password" placeholder="approver token" size="12"><button class="sec" onclick="saveTok()">Use</button></span>
+<button id="out" class="sec hide" onclick="logout()">Log out</button></header>
+<div id="banner" class="banner hide">Sandbox: fictional company data, reset every night. Approve or reject each change the agent proposes.</div>
+
+<div id="auth" class="hide">
+ <h2>Create a profile or log in</h2>
+ <input id="em" type="email" placeholder="email" autocomplete="username">
+ <input id="pw" type="password" placeholder="password (8+ characters)" autocomplete="current-password">
+ <div id="aerr"></div>
+ <div class="row"><button onclick="auth('signup')">Create profile</button><button class="sec" onclick="auth('login')">Log in</button></div>
+</div>
+
+<main id="app" class="hide">
 <section><h2>Chat</h2><div id="log"></div>
-<form onsubmit="send(event)"><input id="msg" placeholder="e.g. Draft a quote for 3 office chairs for Azure Interior" autocomplete="off"><button>Send</button></form></section>
+<div class="chips" id="chips"></div>
+<form class="chat" onsubmit="send(event)"><input id="msg" placeholder="Ask about customers, orders, invoices — or ask it to change something" autocomplete="off"><button>Send</button></form>
+<div class="st" id="left"></div></section>
 <section><h2>Approval queue <button class="sec" onclick="load()">refresh</button></h2><div id="q"></div></section>
 </main>
 <script>
+const $=id=>document.getElementById(id);let mode="private";
+const get=k=>{try{return sessionStorage.getItem(k)||""}catch(e){return ""}},put=(k,v)=>{try{sessionStorage.setItem(k,v)}catch(e){}};
+const CH=["Which customers do we have?","Show unpaid invoices","Draft a quotation for 2 Standing Desks for Contoso Retail","Draft a quotation for 20 Ergonomic Chairs for Northwind Traders","Confirm the draft order for Northwind Traders"];
 const sid=(crypto.randomUUID?crypto.randomUUID():String(Math.random())).slice(0,16);
-const $=id=>document.getElementById(id);
-const tok=k=>sessionStorage.getItem(k)||"";
-function saveTok(){sessionStorage.setItem("a",$("atok").value);sessionStorage.setItem("p",$("ptok").value);$("atok").value=$("ptok").value="";load()}
-async function api(path,tk,body){const r=await fetch(path,{method:body===undefined?"GET":"POST",headers:{"Authorization":"Bearer "+tok(tk),"Content-Type":"application/json"},body:body===undefined?undefined:JSON.stringify(body)});
- const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.detail||r.status);return j}
+const tk=()=>mode==="demo"?get("s"):null;
+async function api(path,which,body){const t=mode==="demo"?get("s"):get(which);
+ const r=await fetch(path,{method:body===undefined?"GET":"POST",headers:{"Authorization":"Bearer "+t,"Content-Type":"application/json"},body:body===undefined?undefined:JSON.stringify(body)});
+ const j=await r.json().catch(()=>({}));if(!r.ok){const e=new Error(typeof j.detail==="string"?j.detail:(r.status+""));e.status=r.status;throw e}return j}
+async function init(){mode=(await (await fetch("/config")).json()).mode;
+ if(mode==="demo"){$("banner").classList.remove("hide");CH.forEach(c=>{const b=document.createElement("button");b.className="sec";b.textContent=c;b.onclick=()=>{$("msg").value=c;$("msg").focus()};$("chips").append(b)});
+  if(get("s")){try{await enter()}catch(e){showAuth()}}else showAuth()}
+ else{$("tokbox").classList.remove("hide");$("app").classList.remove("hide");load()}}
+function showAuth(){$("auth").classList.remove("hide");$("app").classList.add("hide");$("out").classList.add("hide")}
+async function enter(){const me=await api("/me");$("who").textContent=me.email;$("left").textContent=me.chats_left_today+" messages left today";
+ $("auth").classList.add("hide");$("app").classList.remove("hide");$("out").classList.remove("hide");
+ if(!$("log").children.length)add("a","Hi! Ask me about the sandbox company's customers, products, orders or invoices. If you ask me to change something, I will only propose it — you approve or reject it in the queue on the right.");load()}
+async function auth(kind){$("aerr").textContent="";try{const j=await fetch("/"+kind,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email:$("em").value,password:$("pw").value})});
+ const d=await j.json();if(!j.ok)throw new Error(typeof d.detail==="string"?d.detail:"Could not "+kind);put("s",d.token);$("pw").value="";await enter()}catch(e){$("aerr").textContent=e.message}}
+async function logout(){try{await api("/logout","s",{})}catch(e){}put("s","");location.reload()}
+function saveTok(){put("a",$("atok").value);put("p",$("ptok").value);$("atok").value=$("ptok").value="";load()}
 function add(cls,t){const d=document.createElement("div");d.className="m "+cls;d.textContent=t;$("log").append(d);$("log").scrollTop=1e9}
 async function send(e){e.preventDefault();const t=$("msg").value.trim();if(!t)return;$("msg").value="";add("u",t);
- try{const j=await api("/chat","a",{session_id:sid,message:t});add("a",j.reply||"(no reply)");load()}catch(x){add("a","Error: "+x.message)}}
+ try{const j=await api("/chat","a",mode==="demo"?{message:t}:{session_id:sid,message:t});add("a",j.reply||"(no reply)");
+  if(j.chats_left_today!==undefined)$("left").textContent=j.chats_left_today+" messages left today";load()}
+ catch(x){if(x.status===401&&mode==="demo")showAuth();else add("a","Error: "+x.message)}}
 function card(p){const d=document.createElement("div");d.className="p "+p.risk;
- const pend=p.status==="pending";
- d.innerHTML=`<div class="row"><b></b><span class="tag"></span><span class="st"></span></div><div class="w"></div><pre></pre><div class="act row"></div>`;
+ d.innerHTML='<div class="row"><b></b><span class="tag"></span><span class="st"></span></div><div class="w"></div><pre></pre><div class="act row"></div>';
  d.querySelector("b").textContent=p.preview.summary;d.querySelector(".tag").textContent=p.risk+" risk";
- d.querySelector(".st").textContent=`#${p.id} · ${p.status}`+(p.error?` · ${p.error}`:"");
+ d.querySelector(".st").textContent="#"+p.id+" · "+p.status+(p.error?" · "+p.error:"");
  d.querySelector(".w").textContent=(p.preview.warnings||[]).join(" • ");
  d.querySelector("pre").textContent=JSON.stringify(p.result||p.preview.details,null,1);
- if(pend){const a=d.querySelector(".act");let c=null;
+ if(p.status==="pending"){const a=d.querySelector(".act");let c=null;
   if(p.risk==="high"){c=document.createElement("input");c.placeholder="type "+p.id+" to confirm";c.size=18;a.append(c)}
   const ok=document.createElement("button");ok.className="ok";ok.textContent="Approve";
-  ok.onclick=async()=>{try{await api(`/proposals/${p.id}/approve`,"p",{confirm:c?c.value:null})}catch(x){alert(x.message)}load()};
+  ok.onclick=async()=>{try{await api("/proposals/"+p.id+"/approve","p",{confirm:c?c.value:null})}catch(x){alert(x.message)}load()};
   const no=document.createElement("button");no.className="bad";no.textContent="Reject";
-  no.onclick=async()=>{try{await api(`/proposals/${p.id}/reject`,"p",{})}catch(x){alert(x.message)}load()};
+  no.onclick=async()=>{try{await api("/proposals/"+p.id+"/reject","p",{})}catch(x){alert(x.message)}load()};
   a.append(ok,no)}
  return d}
-async function load(){try{const j=await api("/proposals","p");$("q").replaceChildren(...j.proposals.map(card));if(!j.proposals.length)$("q").textContent="Nothing yet."}catch(x){$("q").textContent="Enter the approver token above. ("+x.message+")"}}
-load();setInterval(()=>tok("p")&&load(),8000);
+async function load(){try{const j=await api("/proposals","p");$("q").replaceChildren(...j.proposals.map(card));if(!j.proposals.length)$("q").textContent="Nothing proposed yet."}
+ catch(x){$("q").textContent=mode==="demo"?"":"Enter the approver token above. ("+x.message+")"}}
+init();setInterval(()=>{if(mode==="demo"?get("s"):get("p"))load()},8000);
 </script></body></html>

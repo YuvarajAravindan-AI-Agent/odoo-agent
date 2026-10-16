@@ -209,3 +209,79 @@ def test_chat_hourly_cap(env, monkeypatch):
     A = {"Authorization": "Bearer agent-secret"}
     codes = [c.post("/chat", json={"session_id": "s", "message": "x"}, headers=A).status_code for _ in range(3)]
     assert codes == [200, 200, 429]
+
+
+# ------------------------------------------------------------------ demo (visitor) mode
+def demo_client(build, steps, monkeypatch, **env):
+    for k, v in env.items():
+        monkeypatch.setenv(k, str(v))
+    return TestClient(create_app(build(scripted(*steps)), mode="demo"))
+
+
+def signup(c, email="a@x.com", pw="password1"):
+    r = c.post("/signup", json={"email": email, "password": pw})
+    assert r.status_code == 200, r.text
+    return {"Authorization": "Bearer " + r.json()["token"]}
+
+
+def test_demo_requires_login(env, monkeypatch):
+    c = demo_client(env[2], [], monkeypatch)
+    assert c.post("/chat", json={"message": "hi"}).status_code == 401
+    assert c.get("/proposals").status_code == 401
+    assert c.get("/config").json()["mode"] == "demo"
+
+
+def test_demo_signup_login_validation(env, monkeypatch):
+    c = demo_client(env[2], [], monkeypatch)
+    assert c.post("/signup", json={"email": "bad", "password": "password1"}).status_code == 400
+    assert c.post("/signup", json={"email": "a@x.com", "password": "short"}).status_code == 400
+    signup(c)
+    assert c.post("/signup", json={"email": "A@x.com", "password": "password1"}).status_code == 400  # dupe, case-insens.
+    assert c.post("/login", json={"email": "a@x.com", "password": "wrongpass1"}).status_code == 401
+    assert c.post("/login", json={"email": "a@x.com", "password": "password1"}).status_code == 200
+
+
+def test_demo_self_approval_and_isolation(env, monkeypatch):
+    odoo, store, build = env
+    c = demo_client(build, [[call("create_partner", name="Mine")], [{"text": "ok"}]], monkeypatch)
+    A, B = signup(c, "a@x.com"), signup(c, "b@x.com")
+    r = c.post("/chat", json={"message": "add Mine"}, headers=A).json()
+    pid = r["proposals"][0]["id"]
+    assert odoo.writes == []                                          # proposing never writes
+    assert c.get("/proposals", headers=B).json()["proposals"] == []   # B cannot see A's proposals
+    assert c.post(f"/proposals/{pid}/approve", json={}, headers=B).status_code == 404
+    assert c.post(f"/proposals/{pid}/reject", headers=B).status_code == 404
+    assert c.post(f"/proposals/{pid}/approve", json={}, headers=A).json()["status"] == "executed"
+    assert any(a["event"] == "executed" for a in c.get("/audit", headers=A).json()["audit"])
+    assert c.get("/audit", headers=B).json()["audit"] == []
+
+
+def test_demo_high_risk_still_needs_typed_id(env, monkeypatch):
+    odoo, store, build = env
+    odoo.orders[100] = {"id": 100, "name": "S100", "partner_id": [1, "A"], "amount_total": 5.0, "state": "draft"}
+    c = demo_client(build, [[call("confirm_sale_order", order_id=100)], [{"text": "ok"}]], monkeypatch)
+    A = signup(c)
+    pid = c.post("/chat", json={"message": "confirm"}, headers=A).json()["proposals"][0]["id"]
+    assert c.post(f"/proposals/{pid}/approve", json={}, headers=A).status_code == 409
+    assert c.post(f"/proposals/{pid}/approve", json={"confirm": pid}, headers=A).json()["status"] == "executed"
+
+
+def test_demo_daily_quota(env, monkeypatch):
+    c = demo_client(env[2], [[{"text": "hi"}]] * 3, monkeypatch, USER_CHATS_PER_DAY=2)
+    A = signup(c)
+    codes = [c.post("/chat", json={"message": "x"}, headers=A).status_code for _ in range(3)]
+    assert codes == [200, 200, 429]
+    assert c.get("/me", headers=A).json()["chats_left_today"] == 0
+
+
+def test_demo_signup_ip_limit_and_logout(env, monkeypatch):
+    c = demo_client(env[2], [], monkeypatch, SIGNUPS_PER_IP_PER_DAY=2)
+    A = signup(c, "a@x.com"); signup(c, "b@x.com")
+    assert c.post("/signup", json={"email": "c@x.com", "password": "password1"}).status_code == 429
+    c.post("/logout", headers=A)
+    assert c.get("/me", headers=A).status_code == 401
+
+
+def test_demo_has_no_token_routes(env, monkeypatch):
+    c = demo_client(env[2], [], monkeypatch)
+    assert c.get("/proposals", headers={"Authorization": "Bearer anything"}).status_code == 401

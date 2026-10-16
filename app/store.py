@@ -18,6 +18,15 @@ CREATE TABLE IF NOT EXISTS proposals (
   preview_json TEXT, risk TEXT, status TEXT, created_at REAL, expires_at REAL,
   decided_at REAL, decided_by TEXT, result_json TEXT, error TEXT
 );
+CREATE TABLE IF NOT EXISTS users (
+  email TEXT PRIMARY KEY, salt BLOB, pw_hash BLOB, created_at REAL, signup_ip TEXT
+);
+CREATE TABLE IF NOT EXISTS sessions (
+  token_hash TEXT PRIMARY KEY, email TEXT, expires_at REAL
+);
+CREATE TABLE IF NOT EXISTS usage (
+  email TEXT, day TEXT, chats INTEGER, PRIMARY KEY (email, day)
+);
 CREATE TABLE IF NOT EXISTS audit (
   id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL, actor TEXT, event TEXT,
   proposal_id TEXT, detail_json TEXT
@@ -61,13 +70,25 @@ class Store:
         row = self._q("SELECT * FROM proposals WHERE id=?", (pid,)).fetchone()
         return self._row(row) if row else None
 
-    def list_proposals(self, status: str | None = None, limit: int = 50) -> list[dict]:
+    def list_proposals(self, status: str | None = None, limit: int = 50, owner: str | None = None) -> list[dict]:
         self.expire_stale()
+        sql, params = "SELECT * FROM proposals WHERE 1=1", []
         if status:
-            rows = self._q("SELECT * FROM proposals WHERE status=? ORDER BY created_at DESC LIMIT ?", (status, limit))
-        else:
-            rows = self._q("SELECT * FROM proposals ORDER BY created_at DESC LIMIT ?", (limit,))
+            sql += " AND status=?"; params.append(status)
+        if owner:
+            sql += " AND session_id=?"; params.append(owner)
+        rows = self._q(sql + " ORDER BY created_at DESC LIMIT ?", (*params, limit))
         return [self._row(r) for r in rows.fetchall()]
+
+    def audit_for_owner(self, owner: str, limit: int = 100) -> list[dict]:
+        rows = self._q(
+            "SELECT a.* FROM audit a JOIN proposals p ON p.id=a.proposal_id WHERE p.session_id=? ORDER BY a.id DESC LIMIT ?",
+            (owner, limit)).fetchall()
+        return [{**dict(r), "detail": json.loads(r["detail_json"])} for r in rows]
+
+    def reset_demo_state(self) -> None:
+        """Nightly: the sandbox Odoo data is wiped, so proposals/audit/history against it are meaningless. Accounts stay."""
+        self._q("DELETE FROM proposals"); self._q("DELETE FROM audit"); self._q("DELETE FROM usage")
 
     def expire_stale(self) -> None:
         self._q("UPDATE proposals SET status='expired' WHERE status='pending' AND expires_at<?", (time.time(),))

@@ -12,6 +12,7 @@ load_dotenv()
 from fastapi import Body, Depends, FastAPI, Header, HTTPException, Request  # noqa: E402
 from fastapi.responses import HTMLResponse, PlainTextResponse  # noqa: E402
 
+from .accounts import Accounts  # noqa: E402
 from .agent import Agent  # noqa: E402
 from .llm import make_generate  # noqa: E402
 from .odoo import Odoo  # noqa: E402
@@ -49,7 +50,9 @@ def _bearer(expected: str, failures: Window):
     return dep
 
 
-def create_app(agent: Agent | None = None, agent_token: str | None = None, approver_token: str | None = None) -> FastAPI:
+def create_app(agent: Agent | None = None, agent_token: str | None = None, approver_token: str | None = None,
+               mode: str | None = None) -> FastAPI:
+    mode = mode or os.getenv("MODE", "private")  # "private": two shared tokens | "demo": visitor accounts, self-approval
     agent_token = agent_token or os.getenv("AGENT_TOKEN", "")
     approver_token = approver_token or os.getenv("APPROVER_TOKEN", "")
     if agent_token and agent_token == approver_token:
@@ -77,11 +80,110 @@ def create_app(agent: Agent | None = None, agent_token: str | None = None, appro
     def robots():
         return "User-agent: *\nDisallow: /\n"
 
+    @app.get("/config")
+    def config():
+        return {"mode": mode, "daily_chats": int(os.getenv("USER_CHATS_PER_DAY", "20"))}
+
     @app.get("/health")
     def health():
         ok, detail = agent.odoo.ping()
         return {"status": "ok", "odoo_reachable": ok, "detail": detail}
 
+
+    if mode == "demo":
+        accounts = Accounts(agent.store)
+        daily = int(os.getenv("USER_CHATS_PER_DAY", "20"))
+        signups = Window(int(os.getenv("SIGNUPS_PER_IP_PER_DAY", "5")), 86400)
+
+        def ip_of(request: Request) -> str:
+            return request.client.host if request.client else "?"
+
+        def user(request: Request, authorization: str | None = Header(default=None)) -> str:
+            ip = ip_of(request)
+            if failures.blocked(ip):
+                raise HTTPException(429, "Too many failed attempts, try later")
+            email = accounts.user_for((authorization or "").removeprefix("Bearer ").strip())
+            if not email:
+                failures.add(ip)
+                raise HTTPException(401, "Please log in")
+            return email
+
+        @app.post("/signup")
+        def signup(request: Request, email: str = Body(..., max_length=200), password: str = Body(..., max_length=100)):
+            ip = ip_of(request)
+            if signups.blocked(ip):
+                raise HTTPException(429, "Too many sign-ups from this address today")
+            signups.add(ip)
+            try:
+                return {"token": accounts.signup(email, password, ip), "email": email.strip().lower()}
+            except ValueError as e:
+                raise HTTPException(400, str(e))
+
+        @app.post("/login")
+        def login(request: Request, email: str = Body(..., max_length=200), password: str = Body(..., max_length=100)):
+            ip = ip_of(request)
+            if failures.blocked(ip):
+                raise HTTPException(429, "Too many failed attempts, try later")
+            tok = accounts.login(email, password)
+            if not tok:
+                failures.add(ip)
+                raise HTTPException(401, "Wrong email or password")
+            return {"token": tok, "email": email.strip().lower()}
+
+        @app.post("/logout")
+        def logout(authorization: str | None = Header(default=None), email: str = Depends(user)):
+            accounts.logout((authorization or "").removeprefix("Bearer ").strip())
+            return {"ok": True}
+
+        @app.get("/me")
+        def me(email: str = Depends(user)):
+            return {"email": email, "chats_left_today": accounts.remaining(email, daily)}
+
+        @app.post("/chat")
+        def d_chat(message: str = Body(..., max_length=2000, embed=True), email: str = Depends(user)):
+            if chats.blocked("all"):
+                raise HTTPException(429, "The sandbox is busy, try again in a few minutes")
+            if not accounts.charge_chat(email, daily):
+                raise HTTPException(429, f"Daily limit of {daily} messages reached, come back tomorrow")
+            chats.add("all")
+            try:
+                out = agent.chat(email, message)
+            except RuntimeError as e:
+                raise HTTPException(502, str(e))
+            return {**out, "chats_left_today": accounts.remaining(email, daily)}
+
+        def owned(pid: str, email: str) -> dict:
+            p = agent.store.get(pid)
+            if not p or p["session_id"] != email:
+                raise HTTPException(404, "no such proposal")
+            return p
+
+        @app.get("/proposals")
+        def d_proposals(email: str = Depends(user)):
+            return {"proposals": agent.store.list_proposals(owner=email)}
+
+        @app.post("/proposals/{pid}/approve")
+        def d_approve(pid: str, confirm: str | None = Body(default=None, embed=True), email: str = Depends(user)):
+            owned(pid, email)
+            try:
+                return agent.approve(pid, email, confirm)
+            except PermissionError as e:
+                raise HTTPException(409, str(e))
+
+        @app.post("/proposals/{pid}/reject")
+        def d_reject(pid: str, email: str = Depends(user)):
+            owned(pid, email)
+            if not agent.store.reject(pid, email):
+                raise HTTPException(409, "proposal is not pending")
+            return agent.store.get(pid)
+
+        @app.get("/audit")
+        def d_audit(email: str = Depends(user)):
+            return {"audit": agent.store.audit_for_owner(email)}
+
+        return app
+
+    # ---------------------------------------------------------------- private mode (two shared tokens)
     @app.post("/chat", dependencies=[Depends(is_agent)])
     def chat(session_id: str = Body(..., max_length=64), message: str = Body(..., max_length=2000)):
         if chats.blocked("all"):
