@@ -7,7 +7,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-load_dotenv()
+if os.getenv("MODE") != "demo":
+    load_dotenv()  # the public sandbox process must never read the private instance's tokens from .env
 
 from fastapi import Body, Depends, FastAPI, Header, HTTPException, Request  # noqa: E402
 from fastapi.responses import HTMLResponse, PlainTextResponse  # noqa: E402
