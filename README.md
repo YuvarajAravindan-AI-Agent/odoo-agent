@@ -8,7 +8,7 @@ A human approves each one with a separate token.
 - Two different tokens (startup refuses if equal). The agent token cannot approve.
 - High risk (confirm, cancel, quotes >= `HIGH_VALUE_THRESHOLD`) needs the proposal id typed.
 - Atomic claim (no double-run), 15-min expiry, args hash check, re-validation and state re-check at execution time.
-- Runs as a dedicated least-privilege Odoo user (`ai_agent`), so Odoo's own ACLs are the last line of defence.
+- Runs as a dedicated least-privilege Odoo user (`ai_agent`: Salesperson, read-only Accounting, Contact/Creation), so Odoo's own ACLs are the last line of defence.
 - Append-only audit log (`/audit`): reads, proposals, approvals, rejections, results.
 
 ## Run / test
@@ -24,5 +24,4 @@ Add a `Tool` in `app/tools.py` with `write=True`, a `validate`, a `preview` (wha
 Nothing else changes: the gate applies automatically.
 
 ## Known gaps
-- `ai_agent` lacks the "Contact/Creation" group, so `create_partner` is refused by Odoo until that group is granted.
 - Chat history is in memory; proposals/audit are in SQLite.
