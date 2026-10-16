@@ -40,17 +40,29 @@ class Tool:
 
 
 # ---------------------------------------------------------------- read tools
+def _tokens(q: str) -> list[str]:
+    """Forgiving match: every word must appear (any order); a trailing plural 's' is ignored."""
+    return [t[:-1] if len(t) > 3 and t.endswith("s") else t for t in q.lower().split()]
+
+
 def _search_partners(odoo, a, ctx):
-    q = a["query"]
-    return odoo.search_read(
-        "res.partner", [["user_ids", "=", False], "|", ["name", "ilike", q], ["email", "ilike", q]],  # customers, not staff/service users
-        ["name", "email", "phone", "city"], limit=10)
+    domain = [["user_ids", "=", False]]  # customers, not staff/service users
+    domain += [["name", "ilike", t] for t in _tokens(a["query"])]
+    return odoo.search_read("res.partner", domain, ["name", "email", "phone", "city"], limit=10)
+
+
+def _list_customers(odoo, a, ctx):
+    return odoo.search_read("res.partner", [["user_ids", "=", False], ["customer_rank", ">", 0]],
+                            ["name", "email", "city"], limit=25, order="name")
 
 
 def _search_products(odoo, a, ctx):
-    return odoo.search_read(
-        "product.product", [["sale_ok", "=", True], "|", ["name", "ilike", a["query"]], ["default_code", "ilike", a["query"]]],
-        ["name", "list_price", "default_code"], limit=10)
+    domain = [["sale_ok", "=", True]] + [["name", "ilike", t] for t in _tokens(a["query"])]
+    return odoo.search_read("product.product", domain, ["name", "list_price", "default_code"], limit=10)
+
+
+def _list_products(odoo, a, ctx):
+    return odoo.search_read("product.product", [["sale_ok", "=", True]], ["name", "list_price"], limit=25, order="name")
 
 
 def _list_orders(odoo, a, ctx):
@@ -207,6 +219,10 @@ TOOLS: dict[str, Tool] = {t.name: t for t in [
          {"type": "object", "properties": {"query": S}, "required": ["query"]}, False, _v_query, _search_partners),
     Tool("search_products", "Find sellable products by name or code; returns list prices.",
          {"type": "object", "properties": {"query": S}, "required": ["query"]}, False, _v_query, _search_products),
+    Tool("list_customers", "List our customers (up to 25).",
+         {"type": "object", "properties": {}}, False, lambda a: {}, _list_customers),
+    Tool("list_products", "List sellable products with list prices (up to 25).",
+         {"type": "object", "properties": {}}, False, lambda a: {}, _list_products),
     Tool("list_sales_orders", "List recent sales orders, optionally by order number (name, e.g. S00007), partner or state. Use it to find an order's id.",
          {"type": "object", "properties": {"name": S, "partner_id": I, "state": {"type": "string", "enum": ["draft", "sent", "sale", "cancel"]}}},
          False, _v_list_orders, _list_orders),
