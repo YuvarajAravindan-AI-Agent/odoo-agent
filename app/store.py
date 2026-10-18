@@ -63,7 +63,11 @@ class Store:
             (pid, session_id, tool, json.dumps(args), args_hash(tool, args), json.dumps(preview, default=str),
              risk, "pending", now, now + ttl),
         )
-        self.audit("agent", "proposed", pid, {"tool": tool, "args": args, "risk": risk})
+        detail = {"tool": tool, "args": args, "risk": risk}
+        pol = preview.get("details", {}).get("policy") if isinstance(preview.get("details"), dict) else None
+        if pol:  # the policy decision that allowed this proposal to exist
+            detail["decision_id"] = pol.get("decision_id")
+        self.audit("agent", "proposed", pid, detail)
         return self.get(pid)
 
     def get(self, pid: str) -> dict | None:
@@ -82,8 +86,9 @@ class Store:
 
     def audit_for_owner(self, owner: str, limit: int = 100) -> list[dict]:
         rows = self._q(
-            "SELECT a.* FROM audit a JOIN proposals p ON p.id=a.proposal_id WHERE p.session_id=? ORDER BY a.id DESC LIMIT ?",
-            (owner, limit)).fetchall()
+            "SELECT a.* FROM audit a LEFT JOIN proposals p ON p.id=a.proposal_id WHERE p.session_id=? "
+            "OR (a.proposal_id IS NULL AND a.event='policy_denied' AND json_extract(a.detail_json, '$.session')=?) "
+            "ORDER BY a.id DESC LIMIT ?", (owner, owner, limit)).fetchall()
         return [{**dict(r), "detail": json.loads(r["detail_json"])} for r in rows]
 
     def reset_demo_state(self) -> None:

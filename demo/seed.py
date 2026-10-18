@@ -3,7 +3,9 @@
 Run on the server after the odoo_demo DB is initialised. Writes /opt/odoo-agent/demo.env (0600) for the demo service.
 Idempotent enough for the nightly rebuild, which always starts from a fresh DB.
 """
+import datetime
 import os
+import random
 import secrets
 import xmlrpc.client
 
@@ -50,9 +52,44 @@ for partner, (p, q) in [("Initech Services", ("Onboarding Workshop", 1)), ("Star
              "invoice_date": "2026-09-20", "invoice_line_ids": [(0, 0, {"product_id": prod[p], "quantity": q})]}])
     ex("account.move", "action_post", [[inv]])
 
-# 4. least-privilege service user for the agent
+# 3b. refund scenario: ~300 invoices over the last 120 days (dates relative to the rebuild day, so the demo
+#     looks the same every morning), most paid, three already refunded today. Northwind's newest invoice is a
+#     clean, eligible one for the "single refund" path.
+rng, today = random.Random(42), datetime.date.today()
+GOODS = [n for n, _, t in PRODUCTS if t == "consu"]
+names = list(pid)
+vals = []
+for k in range(300):
+    partner = "Northwind Traders" if k == 0 else names[rng.randrange(len(names))]
+    if k == 0:
+        lines = [("Ergonomic Chair", 2)]
+    elif k % 37 == 5:
+        lines = [("Onboarding Workshop", 2)]  # above the single-refund limit
+    else:
+        lines = [(p, rng.choice([1, 1, 2, 3, 4])) for p in rng.sample(GOODS, rng.choice([1, 1, 2]))]
+    vals.append({"move_type": "out_invoice", "partner_id": pid[partner],
+                 "invoice_date": (today - datetime.timedelta(days=int(k * 120 / 300))).isoformat(),
+                 "invoice_line_ids": [(0, 0, {"product_id": prod[p], "quantity": q}) for p, q in lines]})
+inv_ids = []
+for i in range(0, len(vals), 50):
+    chunk = ex("account.move", "create", [vals[i:i + 50]])
+    ex("account.move", "action_post", [chunk])
+    inv_ids += chunk
+paid = [i for n, i in enumerate(inv_ids) if n == 0 or rng.random() < 0.88]
+for i in range(0, len(paid), 50):
+    w = ex("account.payment.register", "create", [{}], {"context": {"active_model": "account.move", "active_ids": paid[i:i + 50]}})
+    ex("account.payment.register", "action_create_payments", [[w]])
+small = ex("account.move", "search_read", [[["id", "in", paid[1:80]], ["amount_total", "<", 500]]], {"fields": ["id", "journal_id"], "limit": 3})
+for r in small:
+    w = ex("account.move.reversal", "create", [{"move_ids": [(6, 0, [r["id"]])], "journal_id": r["journal_id"][0], "reason": "damaged goods"}])
+    ex("account.move.reversal", "refund_moves", [[w]])
+    cn = ex("account.move", "search_read", [[["reversed_entry_id", "=", r["id"]], ["state", "=", "draft"]]], {"fields": ["id"], "limit": 1})
+    ex("account.move", "action_post", [[cn[0]["id"]]])
+
+# 4. least-privilege service user for the agent (Billing so an APPROVED refund can post its credit note)
 groups = []
-for mod, name in [("sales_team", "group_sale_salesman_all_leads"), ("account", "group_account_readonly"), ("base", "group_partner_manager")]:
+for mod, name in [("sales_team", "group_sale_salesman_all_leads"), ("account", "group_account_readonly"),
+                  ("account", "group_account_invoice"), ("base", "group_partner_manager")]:
     r = ex("ir.model.data", "search_read", [[["module", "=", mod], ["name", "=", name]]], {"fields": ["res_id"], "limit": 1})
     assert r, f"missing group {mod}.{name}"
     groups.append(r[0]["res_id"])
@@ -66,4 +103,5 @@ lines = ["MODE=demo", f"ODOO_URL={URL}", f"ODOO_DB={DB}", "ODOO_USER=ai_agent", 
          f"DB_PATH={ROOT}/demo-agent.db", "PROPOSAL_TTL_SECONDS=1800", "HIGH_VALUE_THRESHOLD=2000",
          "USER_CHATS_PER_DAY=20", "CHAT_PER_HOUR=120", "SIGNUPS_PER_IP_PER_DAY=5", ""]
 open(os.path.join(ROOT, "demo.env"), "w").write("\n".join(lines)); os.chmod(os.path.join(ROOT, "demo.env"), 0o600)
-print("seeded: %d customers, %d products; demo.env written" % (len(pid), len(prod)))
+print("seeded: %d customers, %d products, %d invoices (%d paid, %d refunded); demo.env written"
+      % (len(pid), len(prod), len(inv_ids), len(paid), len(small)))

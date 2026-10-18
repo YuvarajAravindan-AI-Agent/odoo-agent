@@ -1,0 +1,11 @@
+{
+  "refund_policy_version": "2026-10-18.1",
+  "refund_limits": {
+    "max_batch": 5,
+    "per_refund_max": 2000,
+    "daily_cap": 5000,
+    "window_days": 60,
+    "approval_high_over": 1000,
+    "reasons": ["damaged_goods", "late_delivery", "billing_error", "duplicate_charge"]
+  }
+}
