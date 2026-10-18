@@ -17,6 +17,7 @@ from .accounts import Accounts  # noqa: E402
 from .agent import Agent  # noqa: E402
 from .llm import make_generate  # noqa: E402
 from .odoo import Odoo  # noqa: E402
+from .policy import Policy  # noqa: E402
 from .store import Store  # noqa: E402
 
 
@@ -65,7 +66,8 @@ def create_app(agent: Agent | None = None, agent_token: str | None = None, appro
             odoo, Store(os.getenv("DB_PATH", "./agent.db")),
             make_generate(os.environ["GEMINI_BASE"], os.environ["GEMINI_API_KEY"], os.getenv("GEMINI_MODEL", "gemini-2.5-flash")),
             ttl=int(os.getenv("PROPOSAL_TTL_SECONDS", "900")),
-            high_value_threshold=float(os.getenv("HIGH_VALUE_THRESHOLD", "50000")))
+            high_value_threshold=float(os.getenv("HIGH_VALUE_THRESHOLD", "50000")),
+            policy=Policy(os.getenv("OPA_URL", "http://127.0.0.1:8181/v1/data/refunds/decision")))
 
     app = FastAPI(title="Odoo approval-gated agent")
     failures = Window(int(os.getenv("AUTH_FAIL_LIMIT", "10")), 900)  # shared across both tokens, per client IP

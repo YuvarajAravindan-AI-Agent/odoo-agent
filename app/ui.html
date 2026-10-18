@@ -23,6 +23,9 @@ form.chat{display:flex;gap:6px;margin-top:8px}form.chat input{flex:1}
 .tag{font-size:11px;padding:1px 6px;border-radius:99px;border:1px solid currentColor}.high .tag{color:var(--bad)}.low .tag{color:var(--ok)}
 .w{color:var(--warn);font-size:13px}pre{margin:6px 0;white-space:pre-wrap;font-size:12px;opacity:.85}.row{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
 .st{font-size:12px;opacity:.8}
+.blk{border:1px solid var(--bad);background:var(--card);max-width:100%;white-space:normal}.blk>b{color:var(--bad)}
+.blk ul{margin:6px 0 4px;padding-left:18px}.blk li{margin:2px 0}.blk .ex{font-size:12px;opacity:.8;margin:2px 0}
+.pol{font-size:12px;color:var(--ok);margin-top:4px}
 #auth{max-width:380px;margin:40px auto;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:20px}
 #auth input{width:100%;margin:6px 0}#auth .row button{flex:1}#aerr{color:var(--bad);font-size:13px;min-height:18px}
 .hide{display:none!important}
@@ -51,7 +54,11 @@ form.chat{display:flex;gap:6px;margin-top:8px}form.chat input{flex:1}
 <script>
 const $=id=>document.getElementById(id);let mode="private";
 const get=k=>{try{return sessionStorage.getItem(k)||""}catch(e){return ""}},put=(k,v)=>{try{sessionStorage.setItem(k,v)}catch(e){}};
-const CH=["Which customers do we have?","Show unpaid invoices","Draft a quotation for 2 Standing Desks for Contoso Retail","Draft a quotation for 20 Ergonomic Chairs for Northwind Traders","Confirm the draft order for Northwind Traders"];
+const CH=["Which customers do we have?","Show paid invoices","Customers complained about late deliveries. Refund every invoice paid in the last 90 days.","Refund the latest paid invoice for Northwind Traders, damaged goods","Draft a quotation for 2 Standing Desks for Contoso Retail"];
+const RULE={batch_limit:"Too many refunds in one request",daily_cap:"Daily refund cap exceeded",not_paid:"Invoice not paid",already_refunded:"Already refunded",
+ outside_window:"Outside the refund window",over_limit:"Above the single-refund limit",reason:"Reason not approved",not_posted:"Invoice not posted",
+ not_customer_invoice:"Not a customer invoice",malformed_input:"Incomplete facts",policy_unavailable:"Policy engine unreachable",empty:"Nothing matched"};
+const fmt=n=>Number(n||0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
 const sid=(crypto.randomUUID?crypto.randomUUID():String(Math.random())).slice(0,16);
 const tk=()=>mode==="demo"?get("s"):null;
 async function api(path,which,body){const t=mode==="demo"?get("s"):get(which);
@@ -70,15 +77,23 @@ async function auth(kind){$("aerr").textContent="";try{const j=await fetch("/"+k
 async function logout(){try{await api("/logout","s",{})}catch(e){}put("s","");location.reload()}
 function saveTok(){put("a",$("atok").value);put("p",$("ptok").value);$("atok").value=$("ptok").value="";load()}
 function add(cls,t){const d=document.createElement("div");d.className="m "+cls;d.textContent=t;$("log").append(d);$("log").scrollTop=1e9}
+function blockedCard(b){const d=document.createElement("div");d.className="m blk";
+ d.innerHTML='<b>Blocked by refund policy</b> <span class="st"></span><div></div><ul></ul><div class="ex"></div><div class="st">Nothing was proposed. Nothing changed in Odoo.</div>';
+ d.querySelector(".st").textContent="· OPA decision "+(b.decision_id||"none").slice(0,8)+(b.policy_version?" · policy "+b.policy_version:"");
+ d.querySelector("div").textContent=b.count+" invoice(s) · "+fmt(b.total)+" requested"+(b.daily_cap?" · today would reach "+fmt(b.refunds_today_after)+" of a "+fmt(b.daily_cap)+" cap":"");
+ const ul=d.querySelector("ul");Object.entries(b.counts||{}).sort((x,y)=>y[1]-x[1]).forEach(([k,n])=>{const li=document.createElement("li");li.textContent=(RULE[k]||k)+(n>1?" — "+n+" invoices":"");ul.append(li)});
+ d.querySelector(".ex").textContent=(b.reasons||[]).slice(0,4).join("  ");
+ $("log").append(d);$("log").scrollTop=1e9}
 async function send(e){e.preventDefault();const t=$("msg").value.trim();if(!t)return;$("msg").value="";add("u",t);
- try{const j=await api("/chat","a",mode==="demo"?{message:t}:{session_id:sid,message:t});add("a",j.reply||"(no reply)");
+ try{const j=await api("/chat","a",mode==="demo"?{message:t}:{session_id:sid,message:t});(j.blocked||[]).forEach(blockedCard);add("a",j.reply||"(no reply)");
   if(j.chats_left_today!==undefined)$("left").textContent=j.chats_left_today+" messages left today";load()}
  catch(x){if(x.status===401&&mode==="demo")showAuth();else add("a","Error: "+x.message)}}
 function card(p){const d=document.createElement("div");d.className="p "+p.risk;
- d.innerHTML='<div class="row"><b></b><span class="tag"></span><span class="st"></span></div><div class="w"></div><pre></pre><div class="act row"></div>';
+ d.innerHTML='<div class="row"><b></b><span class="tag"></span><span class="st"></span></div><div class="w"></div><div class="pol"></div><pre></pre><div class="act row"></div>';
  d.querySelector("b").textContent=p.preview.summary;d.querySelector(".tag").textContent=p.risk+" risk";
  d.querySelector(".st").textContent="#"+p.id+" · "+p.status+(p.error?" · "+p.error:"");
  d.querySelector(".w").textContent=(p.preview.warnings||[]).join(" • ");
+ const pol=(p.preview.details||{}).policy;if(pol)d.querySelector(".pol").textContent="Policy: allowed · OPA decision "+(pol.decision_id||"").slice(0,8)+" · refunds today after this: "+fmt(pol.refunds_today_after)+" of "+fmt(pol.daily_cap);
  d.querySelector("pre").textContent=JSON.stringify(p.result||p.preview.details,null,1);
  if(p.status==="pending"){const a=d.querySelector(".act");let c=null;
   if(p.risk==="high"){c=document.createElement("input");c.placeholder="type "+p.id+" to confirm";c.size=18;a.append(c)}
