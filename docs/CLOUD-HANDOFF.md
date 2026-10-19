@@ -7,8 +7,8 @@ Repo: YuvarajAravindan-AI-Agent/odoo-agent (private). Branches: `refund-policy-g
 - `tests/mutation_check.py`: 19 deliberate policy bugs, each must make `opa test` fail. First run 13/19, now 19/19.
 - 6 boundary tests added to `policy/refunds_test.rego` (21 total); pytest suite is 28 tests, all passing.
 - `.github/workflows/ci.yml` written (opa test, pytest, mutation check). NOT yet seen running on GitHub.
-- Live adversarial probes run on the public sandbox; demo video built; LinkedIn post and reply to Fred
-  Tanzella's comment published from the desktop (needs the user's logged-in Chrome, so cloud cannot do it).
+- Live adversarial probes run on the public sandbox; demo video built; LinkedIn post and a reply in the
+  discussion thread published from the desktop (needs the user's logged-in Chrome, so cloud cannot do it).
 
 ## For you (cloud) to do, in this order
 1. **Open a PR** `testing-evidence` -> `refund-policy-gate` (and note `refund-policy-gate` is itself unmerged into
