@@ -34,7 +34,7 @@ Repo: YuvarajAravindan-AI-Agent/odoo-agent (private). Branches: `refund-policy-g
 - Anything on the Contabo box (`ssh contabo-tally`), the user's logged-in LinkedIn, local video files in
   `~/Videos/agent-testing-demo`.
 - Merging to the default branch: ask the user first.
-- Turning on branch protection (require Code Owner review, required `tests` check): a repo setting the user does.
+- Turning on branch protection (require Code Owner review, required `tests` check): a repo setting the user does (needs GitHub Pro or a public repo; the API returned 403 on 2026-10-19).
 
 ## Definition of done
 CI green on GitHub for `testing-evidence`; mutmut report summarised; hypothesis test passing or its

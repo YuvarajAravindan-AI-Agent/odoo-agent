@@ -39,5 +39,8 @@ A coding agent helps write this repo, so the tests must not be editable by it al
   on branches and never merges its own pull requests.
 - The mutation check is the second line: weakening a test lets a planted bug survive and fails CI.
 
-Status: CODEOWNERS is in the repo. The branch-protection switches are a repository setting, not a file, and
-must be enabled by the owner; until then the review rule is a convention, not enforced.
+Status (checked 2026-10-19): CODEOWNERS is in the repo, but GitHub refuses branch protection on a private
+repo without GitHub Pro (HTTP 403), so the review rule is NOT enforced by GitHub today. Until the repo is on
+Pro or made public, the control is a working rule: the coding agent works on branches, never merges, and the
+owner reads every diff that touches `policy/`, `tests/` or `.github/`. The mutation check still fails CI if a
+test is weakened.
