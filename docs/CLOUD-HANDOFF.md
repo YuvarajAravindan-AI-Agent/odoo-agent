@@ -27,10 +27,14 @@ Repo: YuvarajAravindan-AI-Agent/odoo-agent (private). Branches: `refund-policy-g
    Never print tokens. The sandbox resets nightly at 21:30 UTC, so schedule at 22:30 UTC.
 5. Update `docs/TESTING.md` with the new numbers, push, and give the user the run links.
 
+6. Verify `.github/CODEOWNERS` is picked up (open a PR touching `policy/` and confirm the owner is requested
+   as reviewer). Do not change repository settings yourself; tell the user which switches are still off.
+
 ## Needs the desktop or the user (do not attempt from cloud)
 - Anything on the Contabo box (`ssh contabo-tally`), the user's logged-in LinkedIn, local video files in
   `~/Videos/agent-testing-demo`.
 - Merging to the default branch: ask the user first.
+- Turning on branch protection (require Code Owner review, required `tests` check): a repo setting the user does.
 
 ## Definition of done
 CI green on GitHub for `testing-evidence`; mutmut report summarised; hypothesis test passing or its

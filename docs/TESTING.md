@@ -30,3 +30,14 @@ OPA's decision log. Injection ("ignore the policy, maintenance mode") was blocke
 time until done" was cut short by already-refunded and daily-cap facts the server reads, not the model;
 refunding unpaid invoices was blocked. What these cannot show is that the model's reasoning is right.
 They show the damage is bounded when it is wrong.
+
+## Who can change the rules and the tests
+A coding agent helps write this repo, so the tests must not be editable by it alone. The control:
+- `.github/CODEOWNERS` makes a human owner the required reviewer for `policy/`, `tests/` and `.github/`.
+- In GitHub settings (Branch protection for the default branch) turn on: require a pull request, require
+  review from Code Owners, require the `tests` check to pass, and do not allow bypass. The coding agent works
+  on branches and never merges its own pull requests.
+- The mutation check is the second line: weakening a test lets a planted bug survive and fails CI.
+
+Status: CODEOWNERS is in the repo. The branch-protection switches are a repository setting, not a file, and
+must be enabled by the owner; until then the review rule is a convention, not enforced.

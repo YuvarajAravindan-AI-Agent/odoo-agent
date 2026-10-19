@@ -1,0 +1,5 @@
+# Changes to the rules, the tests that guard them, and the CI that runs them need a human owner's review.
+# Effective once branch protection has "Require review from Code Owners" turned on (see docs/TESTING.md).
+/policy/                @YuvarajAravindan-AI-Agent
+/tests/                 @YuvarajAravindan-AI-Agent
+/.github/               @YuvarajAravindan-AI-Agent
