@@ -102,3 +102,42 @@ test_string_amount_fails_closed if {
 	d := refunds.decision with input as req("damaged_goods", 0, [i])
 	not d.allow
 }
+
+# ---- boundaries: each limit is inclusive, one past it is denied (found by tests/mutation_check.py)
+test_batch_of_exactly_the_limit_is_allowed if {
+	invs := [inv(sprintf("INV/%v", [n]), 10, 3) | some n in numbers.range(1, 5)]
+	d := refunds.decision with input as req("damaged_goods", 0, invs)
+	d.allow
+	d2 := refunds.decision with input as req("damaged_goods", 0, array.concat(invs, [inv("INV/6", 10, 3)]))
+	d2.counts.batch_limit == 1
+}
+
+test_daily_cap_exactly_reached_is_allowed if {
+	d := refunds.decision with input as req("damaged_goods", 4550, [inv("INV/13", 450, 3)])
+	d.allow
+	d.exposure_today == 5000
+}
+
+test_refund_of_exactly_the_single_limit_is_allowed if {
+	d := refunds.decision with input as req("damaged_goods", 0, [inv("INV/14", 2000, 3)])
+	d.allow
+	d.risk == "high"
+}
+
+test_total_of_exactly_the_high_risk_threshold_stays_low if {
+	d := refunds.decision with input as req("damaged_goods", 0, [inv("INV/15", 1000, 3)])
+	d.allow
+	d.risk == "low"
+}
+
+test_invoice_in_payment_is_refundable if {
+	i := object.union(inv("INV/16", 450, 10), {"payment_state": "in_payment"})
+	d := refunds.decision with input as req("damaged_goods", 0, [i])
+	d.allow
+}
+
+test_missing_refunded_today_alone_fails_closed if {
+	d := refunds.decision with input as {"request": {"reason": "damaged_goods"}, "context": {}, "invoices": [inv("INV/17", 450, 10)]}
+	not d.allow
+	d.counts.malformed_input == 1
+}
